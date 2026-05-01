@@ -1,0 +1,9 @@
+export const SERVICE_TYPES = [];
+export const BOOKING_TYPE_CONFIG = [];
+export const categories = [];
+export const services = [];
+export const banners = { women: [], men: [] };
+export const mockProviders = [];
+export const initialSpotlights = [];
+export const initialGallery = [];
+export const initialTestimonials = [];

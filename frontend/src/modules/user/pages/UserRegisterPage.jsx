@@ -1,0 +1,317 @@
+import React, { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ShieldCheck, ChevronRight, ArrowLeft, CheckCircle2, Star, Smartphone, Apple } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { api } from "@/modules/user/lib/api";
+import { useAuth } from "@/modules/user/contexts/AuthContext";
+import { Button } from "@/modules/user/components/ui/button";
+import { toast } from "sonner";
+
+/**
+ * UserRegisterPage Component
+ * Provides a dedicated, premium registration flow for users.
+ */
+const UserRegisterPage = () => {
+    const navigate = useNavigate();
+    const location = useLocation();
+    const { loginWithOtp, isLoggedIn, updateProfile } = useAuth();
+    const [step, setStep] = useState(1); // 1: Phone, 2: OTP, 3: Profile Setup
+    const [phone, setPhone] = useState("");
+    const [name, setName] = useState("");
+    const [referralCode, setReferralCode] = useState("");
+    const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+    const [timer, setTimer] = useState(60); // 1 minute
+    const [otpDeliveryMode, setOtpDeliveryMode] = useState("sms");
+
+    useEffect(() => {
+        if (isLoggedIn && step !== 3) {
+            const from = location.state?.from || "/home";
+            const extraState = location.state || {};
+            navigate(from, { state: extraState, replace: true });
+        }
+    }, [isLoggedIn, navigate, location.state, step]);
+
+    useEffect(() => {
+        let interval;
+        if (step === 2 && timer > 0) {
+            interval = setInterval(() => setTimer((t) => t - 1), 1000);
+        }
+        return () => clearInterval(interval);
+    }, [step, timer]);
+
+    const handlePhoneSubmit = async (e) => {
+        e.preventDefault();
+        if (phone.length !== 10) return;
+
+        // Basic phone validation (starts with 6-9)
+        if (!/^[6-9]\d{9}$/.test(phone)) {
+            alert("Please enter a valid 10-digit mobile number");
+            return;
+        }
+
+        try {
+            const res = await api.requestOtp(phone, "register");
+            console.log("[UserRegister] request-otp response", res);
+            setOtpDeliveryMode(res?.deliveryMode || "sms");
+            setStep(2);
+            setTimer(60); // Reset to 1 minute
+        } catch (err) {
+             console.error("[UserRegister] request-otp error", err);
+            alert(err.message || "Failed to send OTP");
+            if ((err.message || "").toLowerCase().includes("already")) {
+                navigate("/login");
+            }
+        }
+    };
+
+    const handleVerifyInternal = async (code) => {
+        try {
+            const res = await loginWithOtp({ phone, otp: code, intent: "register" });
+            const isNewUser = !!res?.user?.isNew;
+            if (!isNewUser) {
+                // Existing user - loginWithOtp already navigated or is handling it
+                // But just in case, manual navigation
+                navigate("/home");
+            } else {
+                setStep(3);
+            }
+        } catch (err) {
+            console.error("[UserRegister] verify error", err);
+            toast.error(err.message || "OTP verification failed");
+        }
+    };
+
+    const handleOtpChange = (index, value) => {
+        const char = value.slice(-1);
+        if (char && !/^\d$/.test(char)) return;
+
+        const newOtp = [...otp];
+        newOtp[index] = char;
+        setOtp(newOtp);
+
+        // Auto-focus next field if a value was entered
+        if (char && index < 5) {
+            const nextInput = document.getElementById(`otp-${index + 1}`);
+            if (nextInput) nextInput.focus();
+        }
+
+        // Auto-verify
+        if (newOtp.every(v => v !== "")) {
+            handleVerifyInternal(newOtp.join(""));
+        }
+    };
+
+    const handleOtpKeyDown = (index, e) => {
+        if (e.key === "Backspace") {
+            if (!otp[index] && index > 0) {
+                const prevInput = document.getElementById(`otp-${index - 1}`);
+                if (prevInput) prevInput.focus();
+            }
+        }
+    };
+
+    const handleResend = async () => {
+        try {
+            const res = await api.requestOtp(phone, "register");
+            setOtpDeliveryMode(res?.deliveryMode || "sms");
+            setTimer(60); // Reset to 1 minute
+            toast.success("OTP sent successfully!");
+        } catch (err) {
+            console.error("[UserRegister] resend-otp error", err);
+            toast.error(err.message || "Failed to resend OTP");
+        }
+    };
+
+    const handleProfileSubmit = async (e) => {
+        e.preventDefault();
+        try {
+            await updateProfile({ name: name.trim(), referralCode: referralCode.trim() });
+            console.log("[UserRegister] profile update success", { phone });
+            navigate("/home");
+        } catch (err) {
+            console.error("[UserRegister] profile update error", err);
+            toast.error(err.message || "Failed to complete profile");
+        }
+    };
+
+
+    return (
+        <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 lg:p-8 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-primary/5 via-background to-background">
+            {/* Header / Logo Section */}
+            <div className="mb-12 text-center">
+                <motion.div
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="w-20 h-20 mx-auto rounded-3xl bg-gradient-theme flex items-center justify-center shadow-2xl shadow-primary/20 mb-6"
+                >
+                    <ShieldCheck className="w-10 h-10 text-primary-foreground" />
+                </motion.div>
+                <motion.h1
+                    initial={{ y: 10, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    className="text-3xl font-black font-display tracking-tight text-foreground lowercase"
+                >
+                    stylingwithmuskan
+                </motion.h1>
+                <motion.p
+                    initial={{ y: 10, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: 0.1 }}
+                    className="text-xs text-muted-foreground font-black uppercase tracking-widest mt-2"
+                >
+                    Salon & Spa at Home • Premium Services
+                </motion.p>
+            </div>
+
+            {/* Main Form Card */}
+            <motion.div
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.2 }}
+                className="w-full max-w-lg bg-white/50 backdrop-blur-xl rounded-[24px] sm:rounded-[40px] border border-white p-5 sm:p-8 lg:p-12 shadow-2xl relative overflow-hidden"
+            >
+                {/* Decorative Elements */}
+                <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full -mr-16 -mt-16 blur-3xl px-12 pt-12" />
+
+                <div className="relative">
+                    {/* Back Button */}
+                    {step === 2 && (
+                        <button onClick={() => setStep(step - 1)} className="absolute -left-2 -top-1 w-8 h-8 rounded-full hover:bg-black/5 flex items-center justify-center transition-colors">
+                            <ArrowLeft className="w-5 h-5" />
+                        </button>
+                    )}
+
+                    <AnimatePresence mode="wait">
+                        {step === 1 ? (
+                            <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                                <div className="mb-8">
+                                    <h2 className="text-2xl font-black text-foreground">Sign Up</h2>
+                                    <p className="text-sm text-muted-foreground mt-2 font-medium">Join us for a premium salon experience at your doorstep.</p>
+                                </div>
+
+                                <form onSubmit={handlePhoneSubmit} className="space-y-6">
+                                    <div className="relative group">
+                                        <div className="absolute left-5 top-1/2 -translate-y-1/2 flex items-center gap-2 border-r pr-4 border-border transition-colors group-focus-within:border-primary/30">
+                                            <span className="text-sm font-black text-gray-400 font-display">🇮🇳 +91</span>
+                                        </div>
+                                        <input
+                                            autoFocus
+                                            type="tel"
+                                            maxLength={10}
+                                            placeholder="Mobile Number"
+                                            value={phone}
+                                            onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
+                                            className="w-full h-16 pl-[90px] pr-6 rounded-[24px] bg-accent/30 border-2 border-transparent focus:border-primary/20 focus:bg-white focus:ring-4 focus:ring-primary/10 transition-all text-lg font-bold"
+                                        />
+                                    </div>
+
+                                    <Button disabled={phone.length !== 10} className="w-full h-16 rounded-[24px] text-base font-black tracking-widest uppercase bg-black text-white hover:bg-black/90 shadow-xl shadow-black/10 transition-all hover:scale-[1.02] active:scale-95">
+                                        Receive OTP <ChevronRight className="ml-2 w-5 h-5" />
+                                    </Button>
+
+                                    <p className="text-[11px] text-muted-foreground text-center leading-relaxed font-medium px-4">
+                                        By signing up, you agree to our <span className="text-primary font-bold cursor-pointer hover:underline" onClick={() => navigate("/terms-conditions")}>Terms of Service</span> and <span className="text-primary font-bold cursor-pointer hover:underline" onClick={() => navigate("/privacy-policy")}>Privacy Policy</span>.
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground text-center leading-relaxed font-medium px-4 mt-2">
+                                        Already have an account?{" "}
+                                        <button type="button" onClick={() => navigate("/login")} className="text-primary font-bold hover:underline">
+                                            Login
+                                        </button>
+                                    </p>
+                                </form>
+                            </motion.div>
+                        ) : step === 2 ? (
+                            <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                                <div className="mb-8 text-center pt-4">
+                                    <h2 className="text-2xl font-black text-foreground">Verify OTP</h2>
+                                    <p className="text-sm text-muted-foreground mt-2 font-medium">
+                                        {otpDeliveryMode === "allowlist"
+                                            ? `Enter the 6-digit OTP for +91 ${phone}`
+                                            : `Enter the 6-digit code sent to +91 ${phone}`}
+                                    </p>
+                                </div>
+
+                                 <div className="flex justify-center gap-2 sm:gap-3 w-full max-w-sm mx-auto">
+                                    {otp.map((digit, idx) => (
+                                        <input
+                                            key={idx}
+                                            id={`otp-${idx}`}
+                                            type="tel"
+                                            inputMode="numeric"
+                                            maxLength={1}
+                                            value={digit}
+                                            autoFocus={idx === 0}
+                                            autoComplete={idx === 0 ? "one-time-code" : "off"}
+                                            onChange={(e) => handleOtpChange(idx, e.target.value)}
+                                            onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                                            className="w-10 h-12 sm:w-12 sm:h-14 text-center text-xl sm:text-2xl font-black bg-accent/40 rounded-xl sm:rounded-2xl border-2 border-transparent focus:border-primary/20 focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all shadow-inner text-foreground flex-shrink-0"
+                                        />
+                                    ))}
+                                </div>
+
+                                <div className="text-center">
+                                    {timer > 0 ? (
+                                        <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest">Resend OTP in <span className="text-primary">{timer}s</span></p>
+                                    ) : (
+                                        <button type="button" onClick={handleResend} className="text-[11px] font-black text-primary uppercase tracking-widest hover:underline decoration-2 underline-offset-4">
+                                            RESEND OTP NOW
+                                        </button>
+                                    )}
+                                </div>
+                            </motion.div>
+                        ) : (
+                            <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                                <div className="mb-8 pt-4">
+                                    <div className="flex items-center gap-2 mb-2 -ml-2">
+                                        <button onClick={() => setStep(2)} className="w-10 h-10 rounded-full hover:bg-black/5 flex items-center justify-center transition-colors">
+                                            <ArrowLeft className="w-6 h-6" />
+                                        </button>
+                                        <h2 className="text-2xl font-black text-foreground">Personalize Profile</h2>
+                                    </div>
+                                    <p className="text-sm text-muted-foreground mt-0 ml-10 font-medium">Help us know you better for a tailored experience.</p>
+                                </div>
+
+                                <form onSubmit={handleProfileSubmit} className="space-y-6">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-4">Full Name*</label>
+                                        <input
+                                            autoFocus
+                                            type="text"
+                                            required
+                                            placeholder="e.g. Muskan Sharma"
+                                            value={name}
+                                            onChange={(e) => setName(e.target.value)}
+                                            className="w-full h-14 px-6 rounded-2xl bg-accent/30 border-none text-base focus:ring-2 focus:ring-primary/20 transition-all font-bold"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground ml-4">Referral Code (Optional)</label>
+                                        <input
+                                            type="text"
+                                            placeholder="e.g. SAVE100"
+                                            value={referralCode}
+                                            onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                                            className="w-full h-14 px-6 rounded-2xl bg-accent/30 border-none text-base focus:ring-2 focus:ring-primary/20 transition-all font-bold tracking-widest"
+                                        />
+                                    </div>
+
+                                    <Button disabled={!name.trim()} className="w-full h-16 rounded-[24px] text-base font-black tracking-widest uppercase bg-black text-white hover:bg-black/90 shadow-xl shadow-black/10 transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2">
+                                        Complete Account <CheckCircle2 className="w-5 h-5" />
+                                    </Button>
+                                </form>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+            </motion.div>
+
+
+            {/* Bottom Credits */}
+            <p className="mt-12 text-[10px] font-bold text-muted-foreground opacity-40 uppercase tracking-widest">
+                &copy; {new Date().getFullYear()} stylingwithmuskan. All Rights Reserved.
+            </p>
+        </div>
+    );
+};
+
+export default UserRegisterPage;
