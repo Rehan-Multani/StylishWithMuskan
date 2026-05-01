@@ -1,0 +1,15 @@
+node_modules
+.env
+dist
+*.log
+
+# PM2 (only for local development, not used in production)
+ecosystem.config.cjs
+.pm2
+
+# Firebase Admin SDK & Config files (folder tracked, but JSON files ignored)
+src/config/*.json
+
+# env files
+.env
+.env.*

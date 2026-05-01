@@ -1,0 +1,107 @@
+import express from "express";
+import helmet from "helmet";
+import morgan from "morgan";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import rateLimit from "express-rate-limit";
+import mongoose from "mongoose";
+import webhooksRoutes from "./routes/webhooks.routes.js";
+import authRoutes from "./routes/auth.routes.js";
+import userRoutes from "./modules/user/routes/index.js";
+import contentRoutes from "./routes/content.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
+import vendorRoutes from "./modules/vendor/routes/index.js";
+import providerRoutes from "./modules/provider/routes/index.js";
+import providersRoutes from "./routes/providers.routes.js";
+import sosRoutes from "./routes/sos.routes.js";
+import bookingsRoutes from "./modules/bookings/routes/index.js";
+import paymentsRoutes from "./routes/payments.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
+import subscriptionRoutes from "./modules/subscriptions/routes/subscription.routes.js";
+import supportRoutes from "./routes/support.routes.js";
+import trainingRoutes from "./routes/training.routes.js";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { ALLOWED_ORIGINS, SWAGGER_SERVER_URL } from "./config.js";
+
+const app = express();
+
+app.set("trust proxy", 1);
+app.use(helmet());
+app.use(morgan("dev"));
+const allowedOrigins = (ALLOWED_ORIGINS || "http://localhost:5173,http://localhost:4173,http://192.168.1.38:5173").split(",").map(s => s.trim()).filter(Boolean);
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes("*")) return cb(null, true);
+    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return cb(null, true);
+    if (origin.endsWith(".vercel.app")) return cb(null, true);
+    
+    console.warn(`[CORS] ❌ Denied origin: ${origin}. Allowed: ${allowedOrigins.join(", ")}`);
+    return cb(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+}));
+
+// IMPORTANT: Webhook route MUST be registered BEFORE express.json()
+// because we need raw body for signature verification
+app.use("/webhooks", webhooksRoutes);
+
+app.use(express.json({
+  limit: "8mb",
+  verify: (req, _res, buf) => {
+    req.rawBody = buf?.toString?.("utf8") || "";
+  },
+}));
+app.use(cookieParser());
+
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 100,
+});
+app.use(limiter);
+
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
+app.get("/",(req,res)=>{
+  res.send("Welcome to Styling With Muskan");
+});
+
+// Fail fast if DB is unavailable (prevents silent local/memory writes)
+app.use((req, res, next) => {
+  const path = req.path || "";
+  if (path === "/healthz" || path.startsWith("/docs")) return next();
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: "Database unavailable" });
+  }
+  return next();
+});
+app.use("/auth", authRoutes);
+app.use("/users", userRoutes);
+app.use("/content", contentRoutes);
+app.use("/admin", adminRoutes);
+app.use("/vendor", vendorRoutes);
+app.use("/provider", providerRoutes);
+app.use("/providers", providersRoutes);
+app.use("/sos", sosRoutes);
+app.use("/bookings", bookingsRoutes);
+app.use("/payments", paymentsRoutes);
+app.use("/notifications", notificationRoutes);
+app.use("/subscriptions", subscriptionRoutes);
+app.use("/support", supportRoutes);
+app.use("/training", trainingRoutes);
+try {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const spec = JSON.parse(fs.readFileSync(path.join(__dirname, "swagger.json"), "utf-8"));
+  const swaggerUi = (await import("swagger-ui-express")).default;
+  if (SWAGGER_SERVER_URL) spec.servers = [{ url: SWAGGER_SERVER_URL }];
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(spec));
+} catch {}
+
+app.use((err, _req, res, _next) => {
+  res.status(err.status || 500).json({ error: err.message || "Server error" });
+});
+
+export default app;

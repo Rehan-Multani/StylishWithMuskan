@@ -1,0 +1,243 @@
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Search, Bell, MapPin, ChevronDown, Home, Compass, Calendar, User, Heart, HelpCircle, ShoppingBag } from "lucide-react";
+
+import { useAuth } from "@/modules/user/contexts/AuthContext";
+import { useCart } from "@/modules/user/contexts/CartContext";
+import { useWishlist } from "@/modules/user/contexts/WishlistContext";
+import AddressModal from "@/modules/user/components/salon/AddressModal";
+import { useGenderTheme } from "@/modules/user/contexts/GenderThemeContext";
+import { useNotifications } from "@/modules/user/contexts/NotificationContext";
+import { useLocation, useNavigate } from "react-router-dom";
+import { api } from "@/modules/user/lib/api";
+import { motion } from "framer-motion";
+import NotificationDropdown from "./NotificationDropdown";
+import SearchDropdown from "./SearchDropdown";
+import { useUserModuleData } from "@/modules/user/contexts/UserModuleDataContext";
+
+const desktopNavItems = [
+  { icon: Home, label: "Home", path: "/home" },
+  { icon: Compass, label: "Explore", path: "/explore" },
+  { icon: Calendar, label: "Bookings", path: "/bookings" },
+  { icon: User, label: "Profile", path: "/profile" },
+];
+
+const Header = () => {
+  const { gender } = useGenderTheme();
+  const { user, isAddressModalOpen, setIsAddressModalOpen, isLoggedIn } = useAuth();
+  const { unreadCount } = useNotifications();
+  const { totalItems, setIsCartOpen } = useCart();
+
+  const { wishlistCount } = useWishlist();
+  const { services, categories, checkAvailability } = useUserModuleData();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const searchRef = useRef(null);
+
+  const userCity = user?.addresses?.[0]?.city || user?.address?.city || null;
+
+  // Filter services based on search query
+  const filteredServices = useMemo(() => {
+    if (searchQuery.trim().length < 2) return [];
+    
+    const query = searchQuery.trim().toLowerCase();
+    
+    return services.filter(s => {
+      const matchesGender = s.gender === gender;
+      const matchesName = s.name.toLowerCase().includes(query);
+      const matchesDescription = s.description?.toLowerCase().includes(query);
+      
+      // Also check category name
+      const category = categories.find(c => c.id === s.category);
+      const matchesCategory = category?.name.toLowerCase().includes(query);
+      
+      const matchesSearch = matchesName || matchesDescription || matchesCategory;
+      const isAvailable = checkAvailability(s, userCity);
+      
+      // Store match type for sorting: 0=Name, 1=Category, 2=Description
+      if (matchesName) s._matchType = 0;
+      else if (matchesCategory) s._matchType = 1;
+      else s._matchType = 2;
+      
+      return matchesGender && matchesSearch && isAvailable;
+    }).sort((a, b) => {
+      if (a._matchType !== b._matchType) return a._matchType - b._matchType;
+      return b.rating - a.rating;
+    });
+  }, [searchQuery, services, categories, gender, userCity, checkAvailability]);
+
+  // Show dropdown when user types (min 2 characters)
+  useEffect(() => {
+    if (searchQuery.trim().length >= 2) {
+      setIsSearchDropdownOpen(true);
+    } else {
+      setIsSearchDropdownOpen(false);
+    }
+  }, [searchQuery]);
+
+  // Click outside handler
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (searchRef.current && !searchRef.current.contains(event.target)) {
+        setIsSearchDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      // Navigate to explore page with the search query
+      navigate(`/explore?q=${encodeURIComponent(searchQuery.trim())}`);
+      setIsSearchDropdownOpen(false);
+    }
+  };
+
+  const handleSearchInputChange = (e) => {
+    setSearchQuery(e.target.value);
+  };
+
+  return (<header className="sticky top-0 z-30 glass-strong border-b border-border">
+    <div className="max-w-6xl mx-auto px-4 py-3">
+      {/* Top Row: Address + Desktop Nav + Notification */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2 sm:gap-4">
+          <img 
+            src="/logo1.png" 
+            alt="Muskan" 
+            onClick={() => window.location.reload()}
+            className="h-12 w-12 sm:h-14 sm:w-14 rounded-full object-cover border-2 border-primary/20 shadow-md transition-transform hover:scale-105 cursor-pointer" 
+          />
+          <div className="h-6 w-px bg-border hidden sm:block"></div>
+          <button
+            onClick={() => setIsAddressModalOpen(true)}
+            className="flex items-center gap-1.5 text-xs sm:text-sm hover:bg-accent px-2 py-1.5 rounded-lg transition-colors group max-w-[140px] sm:max-w-xs"
+          >
+            <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary group-hover:scale-110 transition-transform flex-shrink-0" />
+            <span className="font-medium truncate">
+              {user?.addresses?.[0]?.city || user?.addresses?.[0]?.area || user?.address?.city || user?.address?.area || "Location"}
+            </span>
+            <ChevronDown className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
+          </button>
+        </div>
+
+        {/* Desktop Navigation - visible only on lg+ */}
+        <nav className="hidden lg:flex items-center gap-1">
+          {desktopNavItems.map((item) => {
+            const isActive = (path) => {
+              if (path === "/profile") {
+                const profilePaths = ["/profile", "/edit-profile", "/wallet", "/addresses", "/referral", "/coupons", "/support"];
+                return profilePaths.some(p => location.pathname.startsWith(p));
+              }
+              if (path.startsWith("/explore")) return location.pathname.startsWith("/explore");
+              return location.pathname === path;
+            };
+            const active = isActive(item.path);
+            return (
+              <button
+                key={item.label}
+                onClick={() => navigate(item.path)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${active
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  }`}
+              >
+                <item.icon className="w-4 h-4" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="flex items-center gap-2">
+          {isLoggedIn && (
+            <div className="relative">
+              <button
+                onClick={() => setIsNotifOpen(!isNotifOpen)}
+                className={`w-9 h-9 rounded-full flex items-center justify-center relative transition-all active:scale-90 ${isNotifOpen ? 'bg-primary/10 text-primary' : 'bg-accent hover:bg-primary/10 hover:text-primary'}`}
+              >
+                <Bell className="w-4 h-4" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-[10px] font-bold text-white flex items-center justify-center border-2 border-background animate-in zoom-in">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+              <NotificationDropdown isOpen={isNotifOpen} onClose={() => setIsNotifOpen(false)} />
+            </div>
+          )}
+
+          <button
+            onClick={() => navigate("/wishlist")}
+            className="w-9 h-9 rounded-full bg-accent flex items-center justify-center relative hover:bg-primary/10 hover:text-primary transition-all active:scale-90"
+          >
+            <Heart className="w-4 h-4" />
+            {wishlistCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-[10px] font-bold text-white flex items-center justify-center border-2 border-background animate-in zoom-in">
+                {wishlistCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setIsCartOpen(true)}
+            className="hidden lg:flex w-9 h-9 rounded-full bg-accent items-center justify-center relative hover:bg-primary/10 hover:text-primary transition-all active:scale-90"
+          >
+            <ShoppingBag className="w-4 h-4" />
+            {totalItems > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-[10px] font-bold text-white flex items-center justify-center border-2 border-background animate-in zoom-in">
+                {totalItems}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => navigate("/support")}
+            className="w-9 h-9 rounded-full bg-accent flex items-center justify-center relative hover:bg-primary/10 hover:text-primary transition-all active:scale-90"
+          >
+            <HelpCircle className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Search Bar */}
+      <motion.div
+        ref={searchRef}
+        initial={{ opacity: 0, y: -5 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative"
+      >
+        <form onSubmit={handleSearch}>
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={handleSearchInputChange}
+            placeholder={gender === "women" ? "Search facials, makeup, waxing..." : "Search haircut, grooming, beard..."}
+            className="w-full h-10 pl-10 pr-4 rounded-lg bg-white border border-border/50 text-base placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all font-medium"
+          />
+        </form>
+        
+        {/* Search Dropdown */}
+        <SearchDropdown
+          isOpen={isSearchDropdownOpen}
+          services={filteredServices}
+          searchQuery={searchQuery}
+          onClose={() => setIsSearchDropdownOpen(false)}
+        />
+      </motion.div>
+    </div>
+
+    {/* Address Modal */}
+    <AddressModal
+      isOpen={isAddressModalOpen}
+      onClose={() => setIsAddressModalOpen(false)}
+    />
+  </header>);
+};
+export default Header;
